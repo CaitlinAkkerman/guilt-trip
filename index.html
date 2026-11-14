@@ -66,7 +66,9 @@
   .due { display: block; font-size: .8rem; color: var(--muted); }
   li.late .due { color: var(--bad); }
   .hist-title { font-family: Georgia, "Times New Roman", serif; font-size: 1.2rem; margin: 26px 0 8px; }
-    #history li { opacity: .75; }
+      #history li { opacity: .75; }
+  .intensity { display: block; margin-bottom: 10px; font-size: .9rem; color: var(--muted); }
+  .intensity select { font: inherit; margin-left: 6px; padding: 4px 8px; border-radius: 8px; border: 2px solid var(--ink); background: var(--panel); color: var(--ink); }
   #triage { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 20px; z-index: 10;
             background: color-mix(in srgb, var(--bg) 92%, transparent); }
   #triage.show { display: flex; }
@@ -106,6 +108,13 @@
       <input id="newDue" type="datetime-local" required>
       <button class="act" type="submit">Add</button>
     </form>
+    <label class="intensity">Glitch intensity
+      <select id="intensity">
+        <option value="full">Full chaos</option>
+        <option value="gentle">Gentle (blur only)</option>
+        <option value="calm">Calm (no effects)</option>
+      </select>
+    </label>
     <p id="whisper"></p>
     <ul id="tasks"></ul>
     <div class="actions">
@@ -223,7 +232,7 @@ function makeItem(t) {
 
 // Tired brain = laggy clicks. The more neglect, the longer the delay.
 function toggle(id) {
-  const delay = debt > 40 ? (debt - 40) * 12 : 0;
+  const delay = intensity === "full" && debt > 40 ? (debt - 40) * 12 : 0;
   setTimeout(() => {
     const t = tasks.find(t => t.id === id);
     if (!t) return;
@@ -240,7 +249,10 @@ function updateHud() {
   $("fill").style.background = pct > 70 ? "var(--bad)" : pct > 40 ? "var(--accent)" : "var(--good)";
   $("debtNum").textContent = pct + "%";
   const level = pct > 85 ? 4 : pct > 70 ? 3 : pct > 55 ? 2 : pct > 25 ? 1 : 0;
-  $("desk").className = level ? "l" + level : "";
+    let cls = level;
+  if (intensity === "calm") cls = 0;
+  else if (intensity === "gentle") cls = Math.min(level, 2);
+  $("desk").className = cls ? "l" + cls : "";
 }
 
 // Recalculate neglect once a second
@@ -256,8 +268,8 @@ setInterval(tick, 1000);
 
 // Whispers and scrambled text once you’re tired enough
 setInterval(() => {
-  $("whisper").textContent = debt > 45 ? WHISPERS[Math.floor(Math.random() * WHISPERS.length)] : "";
-  if (debt > 70) {
+  $("whisper").textContent = intensity !== "calm" && debt > 45 ? WHISPERS[Math.floor(Math.random() * WHISPERS.length)] : "";
+  if (intensity === "full" && debt > 70) {
     const open = tasks.filter(t => !t.done);
     if (open.length) {
       const t = open[Math.floor(Math.random() * open.length)];
@@ -270,7 +282,7 @@ setInterval(() => {
 // Buttons start dodging your cursor when you’re exhausted
 document.querySelectorAll(".act").forEach(btn => {
   btn.addEventListener("mouseenter", () => {
-    if (debt > 55 && !btn.closest("#triage") && Math.random() < 0.5) {
+    if (intensity === "full" && debt > 55 && !btn.closest("#triage") && Math.random() < 0.5) {
       const dx = (Math.random() - 0.5) * 80, dy = (Math.random() - 0.5) * 40;
       btn.style.transform = `translate(${dx}px, ${dy}px)`;
       setTimeout(() => btn.style.transform = "", 700);
@@ -298,6 +310,16 @@ $("clearHistory").addEventListener("click", () => {
 });
 
 setInterval(render, 60000);  // keeps the Due/Overdue labels fresh
+// Glitch intensity (saved per device). Defaults to calm if the device asks for reduced motion.
+let intensity = localStorage.getItem("overdue-intensity")
+  || (matchMedia("(prefers-reduced-motion: reduce)").matches ? "calm" : "full");
+$("intensity").value = intensity;
+$("intensity").addEventListener("change", () => {
+  intensity = $("intensity").value;
+  localStorage.setItem("overdue-intensity", intensity);
+  tick();
+});
+
 load();
 render();
 tick();
