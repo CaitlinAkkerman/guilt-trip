@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Guilt Trip</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#cfe4ff">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<style>
+  :root {
+    --bg: #cfe4ff; --panel: #ffffff; --ink: #0b1f44; --muted: #4a5f8a;
+    --accent: #ff9f1c; --good: #12b886; --bad: #e63946; --line: #a9c8f2;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #17171a; --panel: #242429; --ink: #f4f4f6; --muted: #a3a3ad;
+      --accent: #ff9f1c; --good: #2fd4a7; --bad: #ff5c6c; --line: #3a3a42;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #17171a; --panel: #242429; --ink: #f4f4f6; --muted: #a3a3ad;
+    --accent: #ff9f1c; --good: #2fd4a7; --bad: #ff5c6c; --line: #3a3a42;
+    color-scheme: dark;
+  }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body { font-family: system-ui, sans-serif; line-height: 1.5; min-height: 100vh; }
+  main { max-width: 560px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-family: Georgia, "Times New Roman", serif; font-size: 1.9rem; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 18px; }
+  body li { border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); }
+  body .act { border: 2px solid var(--ink); font-weight: 600; box-shadow: 2px 2px 0 var(--ink); }
+  h1 { text-shadow: 0 0 18px color-mix(in srgb, var(--accent) 45%, transparent); }
+  #fill { box-shadow: 0 0 12px var(--accent); }
+
+  /* The part that gets wrecked as you get tired */
+  #desk { transition: filter .4s; }
+  #desk.l1 { filter: blur(0.6px); }
+  #desk.l2 { filter: blur(1.2px); }
+  #desk.l3 { filter: blur(1.8px) saturate(.7); }
+  #desk.l4 { filter: blur(2.4px) saturate(.5); animation: flicker 1.3s infinite; }
+  @keyframes flicker { 0%,100% { opacity: 1; } 45% { opacity: .85; } 50% { opacity: .5; } 55% { opacity: .95; } }
+  @media (prefers-reduced-motion: reduce) { #desk.l4 { animation: none; } }
+
+  .stats { display: flex; gap: 12px; align-items: center; margin-bottom: 8px; }
+  .stats strong { font-variant-numeric: tabular-nums; }
+  .bar { flex: 1; height: 14px; background: var(--line); border-radius: 7px; overflow: hidden; }
+  #fill { height: 100%; width: 0; background: var(--good); transition: width .2s, background .3s; }
+  #whisper { min-height: 1.5em; color: var(--muted); font-style: italic; margin: 0 0 14px; }
+
+  ul { list-style: none; padding: 0; margin: 0 0 18px; }
+  li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+  li button { all: unset; display: block; box-sizing: border-box; width: 100%; padding: 12px 14px; cursor: pointer; }
+  li button:focus-visible, .act:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  li.done { opacity: .5; text-decoration: line-through; }
+  .addrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .addrow input { font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  .addrow input:first-child { flex: 1 1 160px; }
+  .due { display: block; font-size: .8rem; color: var(--muted); }
+  li.late .due { color: var(--bad); }
+  .hist-title { font-family: Georgia, "Times New Roman", serif; font-size: 1.2rem; margin: 26px 0 8px; }
+    #history li { opacity: .75; }
+  #triage { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 20px; z-index: 10;
+            background: color-mix(in srgb, var(--bg) 92%, transparent); }
+  #triage.show { display: flex; }
+  #triage .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; max-width: 400px; width: 100%; }
+  #triage h2 { font-family: Georgia, "Times New Roman", serif; margin-top: 0; }
+  #triage h3 { margin: 14px 0 2px; }
+  .tri-resched { display: block; margin: 12px 0; font-size: .9rem; color: var(--muted); }
+  .tri-resched input { display: block; margin-top: 4px; font: inherit; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+  #history li.empty { text-align: center; padding: 12px; color: var(--muted); background: none; border-style: dashed; }
+  .prog { height: 5px; background: var(--accent); width: 0; transition: width .15s; }
+
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .act { font: inherit; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line);
+         background: var(--panel); color: var(--ink); cursor: pointer; transition: transform .15s; }
+  .act:hover { border-color: var(--accent); }
+
+  #end { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+         background: color-mix(in srgb, var(--bg) 88%, transparent); padding: 20px; }
+  #end.show { display: flex; }
+  #end div { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; max-width: 360px; text-align: center; }
+  #end h2 { font-family: Georgia, serif; margin-top: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Guilt Trip</h1>
+  <p class="sub">Add tasks. Ignore them. Watch your screen unravel.</p>
+
+  <div id="desk">
+    <div class="stats">
+      <span>Neglect</span>
+      <div class="bar"><div id="fill"></div></div>
+      <strong id="debtNum">0%</strong>
+    </div>
+    <form id="addForm" class="addrow">
+      <input id="newName" placeholder="New task" required>
+      <input id="newDue" type="datetime-local" required>
+      <button class="act" type="submit">Add</button>
+    </form>
+    <p id="whisper"></p>
+    <ul id="tasks"></ul>
+    <div class="actions">
+      <button class="act" id="snooze">Snooze the guilt (60s)</button>
+    </div>
+    <h2 class="hist-title">Task History</h2>
+    <ul id="history"></ul>
+    <button class="act" id="clearHistory" hidden>Clear history</button>
+  </div>
+</main>
+
+<div id="triage" role="dialog" aria-modal="true" aria-labelledby="triTitle">
+  <div class="card">
+    <h2 id="triTitle">Welcome back</h2>
+    <p id="triGone"></p>
+    <p id="triCount"></p>
+    <h3 id="triName"></h3>
+    <p id="triDue" class="due"></p>
+    <label class="tri-resched">New due date
+      <input id="triDate" type="datetime-local">
+    </label>
+    <div class="actions">
+      <button class="act" id="triDo">Do it now</button>
+      <button class="act" id="triResched">Reschedule (+guilt)</button>
+      <button class="act" id="triDrop">Drop it</button>
+    </div>
+  </div>
+</div>
+
+<div id="end" role="dialog" aria-live="polite">
+  <div><h2 id="endTitle"></h2><p id="endText"></p><button class="act" id="again">Try again</button></div>
+</div>
+
+<script>
+// ---- Settings you can tweak ----
+const NEGLECT_PER_HOUR = 6;  // points each overdue task adds per hour late
+const MAX_PER_TASK = 40;     // cap so one task can’t max the meter alone
+const STORAGE_KEY = "overdue-tasks";
+const RESCHED_PENALTY = 5;   // extra neglect per reschedule, until the task is done
+
+const WHISPERS = [
+  "Did you send that email?", "The cursor is looking at you.",
+  "One more click won’t hurt.", "The numbers are moving on their own.",
+  "That task is still waiting.", "Is it Tuesday?"
+];
+
+// ---- State ----
+let debt = 0, tasks = [], snoozedUntil = 0, reboundUntil = 0;
+const $ = id => document.getElementById(id);
+
+function load() {
+  try { tasks = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { tasks = []; }
+  tasks.forEach(t => t.scrambled = false);
+}
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+}
+
+// Neglect = every open, overdue task adds points for each hour it’s late
+function calcNeglect() {
+  let total = 0;
+  tasks.forEach(t => {
+    if (t.done) return;
+    const hoursLate = (Date.now() - new Date(t.due).getTime()) / 3600000;
+        if (hoursLate > 0) total += Math.min(MAX_PER_TASK, hoursLate * NEGLECT_PER_HOUR);
+    total += (t.resched || 0) * RESCHED_PENALTY;
+  });
+  return Math.min(100, total);
+}
+
+function scramble(text) {
+  return text.split("").sort(() => Math.random() - 0.5).join("");
+}
+
+function render() {
+  const list = $("tasks");
+  const hist = $("history");
+  list.innerHTML = "";
+  hist.innerHTML = "";
+
+  // Open tasks: soonest due date first
+  tasks.filter(t => !t.done)
+    .sort((a, b) => new Date(a.due) - new Date(b.due))
+    .forEach(t => list.append(makeItem(t)));
+
+  // History: most recently finished first
+  const finished = tasks.filter(t => t.done)
+    .sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+  finished.forEach(t => hist.append(makeItem(t)));
+  if (!finished.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "Nothing finished yet. Suspicious.";
+    hist.append(li);
+  }
+  $("clearHistory").hidden = !finished.length;
+}
+
+function makeItem(t) {
+  const li = document.createElement("li");
+  const late = !t.done && new Date(t.due) < Date.now();
+  if (late) li.className = "late";
+  const btn = document.createElement("button");
+  btn.append(t.scrambled && !t.done ? scramble(t.name) : t.name);
+  const due = document.createElement("span");
+  due.className = "due";
+  due.textContent = t.done
+    ? (t.abandoned ? "Abandoned " : "Finished ") + new Date(t.doneAt || t.due).toLocaleString()
+    : (late ? "Overdue: " : "Due: ") + new Date(t.due).toLocaleString();
+  btn.append(due);
+  btn.addEventListener("click", () => toggle(t.id));
+  li.append(btn);
+  return li;
+}
+
+// Tired brain = laggy clicks. The more neglect, the longer the delay.
+function toggle(id) {
+  const delay = debt > 40 ? (debt - 40) * 12 : 0;
+  setTimeout(() => {
+    const t = tasks.find(t => t.id === id);
+    if (!t) return;
+        t.done = !t.done;
+        t.doneAt = t.done ? Date.now() : null;
+    t.abandoned = false;
+    save(); render(); tick();
+  }, delay);
+}
+
+function updateHud() {
+  const pct = Math.min(100, Math.round(debt));
+  $("fill").style.width = pct + "%";
+  $("fill").style.background = pct > 70 ? "var(--bad)" : pct > 40 ? "var(--accent)" : "var(--good)";
+  $("debtNum").textContent = pct + "%";
+  const level = pct > 85 ? 4 : pct > 70 ? 3 : pct > 55 ? 2 : pct > 25 ? 1 : 0;
+  $("desk").className = level ? "l" + level : "";
+}
+
+// Recalculate neglect once a second
+function tick() {
+  const now = Date.now();
+  let n = calcNeglect();
+  if (now < snoozedUntil) n *= 0.2;                 // snooze: glitches fade
+  else if (now < reboundUntil) n = Math.min(100, n + 15); // then they come back angrier
+  debt = n;
+  updateHud();
+}
+setInterval(tick, 1000);
+
+// Whispers and scrambled text once you’re tired enough
+setInterval(() => {
+  $("whisper").textContent = debt > 45 ? WHISPERS[Math.floor(Math.random() * WHISPERS.length)] : "";
+  if (debt > 70) {
+    const open = tasks.filter(t => !t.done);
+    if (open.length) {
+      const t = open[Math.floor(Math.random() * open.length)];
+      t.scrambled = true; render();
+      setTimeout(() => { t.scrambled = false; render(); }, 500);
+    }
+  }
+}, 2000);
+
+// Buttons start dodging your cursor when you’re exhausted
+document.querySelectorAll(".act").forEach(btn => {
+  btn.addEventListener("mouseenter", () => {
+    if (debt > 55 && !btn.closest("#triage") && Math.random() < 0.5) {
+      const dx = (Math.random() - 0.5) * 80, dy = (Math.random() - 0.5) * 40;
+      btn.style.transform = `translate(${dx}px, ${dy}px)`;
+      setTimeout(() => btn.style.transform = "", 700);
+    }
+  });
+});
+
+$("snooze").addEventListener("click", () => {
+  snoozedUntil = Date.now() + 60000;
+  reboundUntil = snoozedUntil + 120000;
+  tick();
+});
+
+$("addForm").addEventListener("submit", e => {
+  e.preventDefault();
+  tasks.push({ id: Date.now(), name: $("newName").value.trim(), due: $("newDue").value, done: false, scrambled: false });
+  $("addForm").reset();
+  save(); render(); tick();
+});
+
+$("clearHistory").addEventListener("click", () => {
+  if (!confirm("Delete all finished tasks for good?")) return;
+  tasks = tasks.filter(t => !t.done);
+  save(); render(); tick();
+});
+
+setInterval(render, 60000);  // keeps the Due/Overdue labels fresh
+load();
+render();
+tick();
+
+// ---- Welcome-back triage ----
+const SEEN_KEY = "overdue-lastseen";
+let triQueue = [];
+let hiddenAt = 0;
+
+function formatGap(ms) {
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return mins + " minute" + (mins === 1 ? "" : "s");
+  const hrs = Math.round(mins / 60);
+  if (hrs < 48) return hrs + " hour" + (hrs === 1 ? "" : "s");
+  return Math.round(hrs / 24) + " days";
+}
+
+function openTriage() {
+  if ($("triage").classList.contains("show")) return;
+  const lastSeen = Number(localStorage.getItem(SEEN_KEY)) || 0;
+  triQueue = tasks.filter(t => !t.done && new Date(t.due) < Date.now())
+    .sort((a, b) => new Date(a.due) - new Date(b.due));
+  if (!triQueue.length) return;
+  $("triGone").textContent = lastSeen
+    ? "You were gone " + formatGap(Date.now() - lastSeen) + "."
+    : "Let’s see how things are going.";
+  $("triage").classList.add("show");
+  showTriageTask();
+}
+
+function showTriageTask() {
+  const t = triQueue[0];
+  if (!t) { $("triage").classList.remove("show"); render(); tick(); return; }
+  $("triCount").textContent = triQueue.length + " overdue task" + (triQueue.length === 1 ? "" : "s") + " left to deal with.";
+  $("triName").textContent = t.name;
+  $("triDue").textContent = "Was due " + new Date(t.due).toLocaleString();
+  const tomorrow = new Date(Date.now() + 86400000);
+  tomorrow.setMinutes(tomorrow.getMinutes() - tomorrow.getTimezoneOffset());
+  $("triDate").value = tomorrow.toISOString().slice(0, 16);
+}
+
+function nextTriage() {
+  triQueue.shift();
+  save();
+  showTriageTask();
+}
+
+$("triDo").addEventListener("click", nextTriage);
+
+$("triResched").addEventListener("click", () => {
+  const newDue = $("triDate").value;
+  if (!newDue || new Date(newDue) <= Date.now()) { alert("Pick a date in the future."); return; }
+  triQueue[0].due = newDue;
+  triQueue[0].resched = (triQueue[0].resched || 0) + 1;
+  nextTriage();
+});
+
+$("triDrop").addEventListener("click", () => {
+  const t = triQueue[0];
+  t.done = true; t.doneAt = Date.now(); t.abandoned = true;
+  nextTriage();
+});
+
+function markSeen() { localStorage.setItem(SEEN_KEY, String(Date.now())); }
+setInterval(markSeen, 30000);
+window.addEventListener("pagehide", markSeen);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { hiddenAt = Date.now(); markSeen(); }
+  else if (hiddenAt && Date.now() - hiddenAt > 30 * 60000) {
+    localStorage.setItem(SEEN_KEY, String(hiddenAt));
+    openTriage();
+  }
+});
+
+openTriage();
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+</script>
+</body>
+</html>
