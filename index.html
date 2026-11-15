@@ -67,7 +67,12 @@
   li.late .due { color: var(--bad); }
   .hist-title { font-family: Georgia, "Times New Roman", serif; font-size: 1.2rem; margin: 26px 0 8px; }
       #history li { opacity: .75; }
-  .intensity { display: block; margin-bottom: 10px; font-size: .9rem; color: var(--muted); }
+    .intensity { display: block; margin-bottom: 10px; font-size: .9rem; color: var(--muted); }
+  #welcome { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 20px; z-index: 11;
+             background: color-mix(in srgb, var(--bg) 92%, transparent); }
+  #welcome.show { display: flex; }
+  #welcome .card { background: var(--panel); border: 2px solid var(--ink); border-radius: 14px; padding: 22px; max-width: 400px; width: 100%; box-shadow: 4px 4px 0 var(--ink); }
+  #welcome h2 { font-family: Georgia, "Times New Roman", serif; margin-top: 0; }
   .intensity select { font: inherit; margin-left: 6px; padding: 4px 8px; border-radius: 8px; border: 2px solid var(--ink); background: var(--panel); color: var(--ink); }
   #triage { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 20px; z-index: 10;
             background: color-mix(in srgb, var(--bg) 92%, transparent); }
@@ -123,8 +128,26 @@
     <h2 class="hist-title">Task History</h2>
     <ul id="history"></ul>
     <button class="act" id="clearHistory" hidden>Clear history</button>
+    <h2 class="hist-title">Backup</h2>
+    <div class="actions">
+      <button class="act" id="exportBtn">Export tasks</button>
+      <button class="act" id="importBtn">Import tasks</button>
+      <input id="importFile" type="file" accept="application/json,.json" hidden>
+    </div>
   </div>
 </main>
+
+<div id="welcome" role="dialog" aria-modal="true" aria-labelledby="welTitle">
+  <div class="card">
+    <h2 id="welTitle">Welcome to Guilt Trip</h2>
+    <p>Add tasks with due dates. The longer a task sits overdue, the more your screen falls apart. Finish it and everything calms down.</p>
+    <p>Too intense? Use the glitch intensity dropdown to turn the effects down or off. Your tasks stay on this device.</p>
+    <div class="actions">
+      <button class="act" id="welExample">Add example tasks</button>
+      <button class="act" id="welStart">Start fresh</button>
+    </div>
+  </div>
+</div>
 
 <div id="triage" role="dialog" aria-modal="true" aria-labelledby="triTitle">
   <div class="card">
@@ -309,6 +332,46 @@ $("clearHistory").addEventListener("click", () => {
   save(); render(); tick();
 });
 
+// ---- Backup: export / import ----
+$("exportBtn").addEventListener("click", () => {
+  const blob = new Blob([JSON.stringify({ app: "guilt-trip", version: 1, tasks }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "guilt-trip-backup-" + new Date().toISOString().slice(0, 10) + ".json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$("importBtn").addEventListener("click", () => $("importFile").click());
+
+$("importFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const incoming = Array.isArray(data) ? data : data.tasks;
+    if (!Array.isArray(incoming)) throw new Error("bad format");
+    const clean = incoming
+      .filter(t => t && typeof t.name === "string" && t.due && !isNaN(new Date(t.due)))
+      .map(t => ({
+        id: t.id || Date.now() + Math.random(),
+        name: t.name.slice(0, 200),
+        due: t.due,
+        done: !!t.done,
+        doneAt: t.doneAt || null,
+        abandoned: !!t.abandoned,
+        resched: Number(t.resched) || 0,
+        scrambled: false
+      }));
+    if (!confirm("Import " + clean.length + " tasks? This replaces your current list.")) return;
+    tasks = clean;
+    save(); render(); tick();
+  } catch {
+    alert("That file doesn’t look like a Guilt Trip backup.");
+  }
+});
+
 setInterval(render, 60000);  // keeps the Due/Overdue labels fresh
 // Glitch intensity (saved per device). Defaults to calm if the device asks for reduced motion.
 let intensity = localStorage.getItem("overdue-intensity")
@@ -323,6 +386,24 @@ $("intensity").addEventListener("change", () => {
 load();
 render();
 tick();
+
+// ---- First-visit welcome ----
+function closeWelcome() {
+  localStorage.setItem("overdue-onboarded", "1");
+  $("welcome").classList.remove("show");
+}
+if (!localStorage.getItem("overdue-onboarded") && tasks.length === 0) $("welcome").classList.add("show");
+$("welStart").addEventListener("click", closeWelcome);
+$("welExample").addEventListener("click", () => {
+  const hoursAgo = h => new Date(Date.now() - h * 3600000 - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const hoursAhead = h => hoursAgo(-h);
+  tasks.push(
+    { id: Date.now(), name: "Example: reply to that email", due: hoursAgo(5), done: false, scrambled: false },
+    { id: Date.now() + 1, name: "Example: pay a bill", due: hoursAhead(24), done: false, scrambled: false },
+    { id: Date.now() + 2, name: "Example: finish something you’ve been avoiding", due: hoursAhead(72), done: false, scrambled: false }
+  );
+  save(); render(); tick(); closeWelcome();
+});
 
 // ---- Welcome-back triage ----
 const SEEN_KEY = "overdue-lastseen";
