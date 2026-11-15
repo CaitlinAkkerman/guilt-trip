@@ -209,8 +209,31 @@ function load() {
   try { tasks = JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { tasks = []; }
   tasks.forEach(t => t.scrambled = false);
 }
+function newId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// A fingerprint of the parts of a task that get synced
+function sigOf(t) {
+  return JSON.stringify([t.name, t.due, !!t.done, t.doneAt || null, !!t.abandoned, t.resched || 0]);
+}
+
+// Notice which tasks changed since last time and mark them for syncing
+function stampChanges() {
+  tasks.forEach(t => {
+    const sig = sigOf(t);
+    if (t.sig !== sig) { t.sig = sig; t.updatedAt = Date.now(); t.dirty = true; }
+  });
+}
+
 function save() {
+  stampChanges();
   localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  scheduleSync();
 }
 
 // Neglect = every open, overdue task adds points for each hour it’s late
@@ -338,14 +361,16 @@ $("snooze").addEventListener("click", () => {
 
 $("addForm").addEventListener("submit", e => {
   e.preventDefault();
-  tasks.push({ id: Date.now(), name: $("newName").value.trim(), due: $("newDue").value, done: false, scrambled: false });
+  tasks.push({ id: newId(), name: $("newName").value.trim(), due: $("newDue").value, done: false, scrambled: false });
   $("addForm").reset();
   save(); render(); tick();
 });
 
 $("clearHistory").addEventListener("click", () => {
   if (!confirm("Delete all finished tasks for good?")) return;
+    tasks.filter(t => t.done).forEach(t => pendingDeletes.push(t.id));
   tasks = tasks.filter(t => !t.done);
+  localStorage.setItem("overdue-deletes", JSON.stringify(pendingDeletes));
   save(); render(); tick();
 });
 
@@ -372,7 +397,7 @@ $("importFile").addEventListener("change", async e => {
     const clean = incoming
       .filter(t => t && typeof t.name === "string" && t.due && !isNaN(new Date(t.due)))
       .map(t => ({
-        id: t.id || Date.now() + Math.random(),
+        id: newId(),
         name: t.name.slice(0, 200),
         due: t.due,
         done: !!t.done,
@@ -382,7 +407,9 @@ $("importFile").addEventListener("change", async e => {
         scrambled: false
       }));
     if (!confirm("Import " + clean.length + " tasks? This replaces your current list.")) return;
+        tasks.forEach(t => pendingDeletes.push(t.id));
     tasks = clean;
+    localStorage.setItem("overdue-deletes", JSON.stringify(pendingDeletes));
     save(); render(); tick();
   } catch {
     alert("That file doesn’t look like a Guilt Trip backup.");
@@ -409,12 +436,13 @@ const sb = (window.supabase && SUPABASE_URL.startsWith("https://"))
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
   : null;
 let currentUser = null;
+let syncNote = "";
 
 function showAccount() {
   $("signInBtn").hidden = !!currentUser || !sb;
   $("signOutBtn").hidden = !currentUser;
   if (!sb) $("accStatus").textContent = "Sync isn’t available right now. Your tasks stay on this device.";
-  else if (currentUser) $("accStatus").textContent = "Signed in as " + currentUser.email;
+  else if (currentUser) $("accStatus").textContent = "Signed in as " + currentUser.email + (syncNote ? " · " + syncNote : "");
   else $("accStatus").textContent = "Not signed in. Your tasks stay on this device.";
 }
 
@@ -435,7 +463,16 @@ $("signInForm").addEventListener("submit", async e => {
 });
 
 $("signOutBtn").addEventListener("click", async () => {
+  if (!confirm("Sign out? Your tasks stay in your account, but they’ll be removed from this device.")) return;
+  await syncNow();
+  if (tasks.some(t => t.dirty) && !confirm("Some recent changes haven’t synced yet and will be lost on this device. Sign out anyway?")) return;
   await sb.auth.signOut();
+  tasks = [];
+  pendingDeletes = [];
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem("overdue-deletes");
+  syncNote = "";
+  render(); tick();
 });
 
 if (sb) {
@@ -443,14 +480,121 @@ if (sb) {
     currentUser = session ? session.user : null;
     $("signInForm").hidden = true;
     showAccount();
+    if (currentUser) scheduleSync();
   });
   sb.auth.getSession().then(({ data }) => {
     currentUser = data.session ? data.session.user : null;
     showAccount();
+    if (currentUser) scheduleSync();
   });
 } else {
   showAccount();
 }
+
+// ---- Sync (Supabase) ----
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+let pendingDeletes = [];
+try { pendingDeletes = JSON.parse(localStorage.getItem("overdue-deletes") || "[]"); } catch { pendingDeletes = []; }
+let syncing = false, syncAgain = false, syncTimer = null;
+
+function setSyncStatus(msg) { syncNote = msg; showAccount(); }
+
+function scheduleSync() {
+  if (!sb || !currentUser) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncNow, 1500);
+}
+
+function toRemote(t) {
+  return {
+    id: t.id,
+    name: t.name,
+    due: new Date(t.due).toISOString(),
+    done: !!t.done,
+    done_at: t.doneAt ? new Date(t.doneAt).toISOString() : null,
+    abandoned: !!t.abandoned,
+    resched: t.resched || 0
+  };
+}
+
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+function fromRemote(r) {
+  const t = {
+    id: r.id, name: r.name, due: toLocalInput(r.due), done: r.done,
+    doneAt: r.done_at ? Date.parse(r.done_at) : null,
+    abandoned: r.abandoned, resched: r.resched, scrambled: false,
+    updatedAt: Date.parse(r.updated_at), dirty: false
+  };
+  t.sig = sigOf(t);
+  return t;
+}
+
+async function syncNow() {
+  if (!sb || !currentUser) return;
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  setSyncStatus("Syncing…");
+  const before = tasks.map(t => t.id + "|" + t.sig).join();
+  try {
+    // 1. Every local task needs a real ID
+    tasks.forEach(t => { if (!UUID_RE.test(String(t.id))) { t.id = newId(); t.dirty = true; } });
+    stampChanges();
+
+    // 2. Send deletions first
+    const delIds = [...new Set(pendingDeletes)].filter(id => UUID_RE.test(String(id)));
+    if (delIds.length) {
+      const { error: delErr } = await sb.from("tasks").update({ deleted_at: new Date().toISOString() }).in("id", delIds);
+      if (delErr) throw delErr;
+    }
+    pendingDeletes = pendingDeletes.filter(id => UUID_RE.test(String(id)) && !delIds.includes(id));
+    localStorage.setItem("overdue-deletes", JSON.stringify(pendingDeletes));
+
+    // 3. Pull everything from the account and merge (newest edit wins)
+    const { data: remote, error } = await sb.from("tasks").select("*");
+    if (error) throw error;
+    const remoteIds = new Set(remote.map(r => r.id));
+    const toPush = [];
+    remote.forEach(r => {
+      const mine = tasks.find(t => t.id === r.id);
+      if (r.deleted_at) { if (mine) tasks = tasks.filter(t => t.id !== r.id); return; }
+      if (!mine) { tasks.push(fromRemote(r)); return; }
+      if (mine.dirty && mine.updatedAt > Date.parse(r.updated_at)) toPush.push(mine);
+      else Object.assign(mine, fromRemote(r));
+    });
+    tasks.forEach(t => { if (!remoteIds.has(t.id) && !toPush.includes(t)) toPush.push(t); });
+
+    // 4. Push our newer changes
+    const sendable = toPush.filter(t => t.due && !isNaN(new Date(t.due)));
+    if (sendable.length) {
+      const sent = new Map(sendable.map(t => [t.id, t.sig]));
+      const { data: saved, error: upErr } = await sb.from("tasks").upsert(sendable.map(toRemote)).select();
+      if (upErr) throw upErr;
+      saved.forEach(r => {
+        const t = tasks.find(x => x.id === r.id);
+        if (t && t.sig === sent.get(t.id)) { t.updatedAt = Date.parse(r.updated_at); t.dirty = false; }
+      });
+    }
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+    setSyncStatus("Synced " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    if (tasks.map(t => t.id + "|" + t.sig).join() !== before) { render(); tick(); }
+  } catch (err) {
+    console.error("Sync failed:", err);
+    setSyncStatus("Sync paused. Your tasks are safe on this device.");
+  } finally {
+    syncing = false;
+    if (syncAgain) { syncAgain = false; scheduleSync(); }
+  }
+}
+
+setInterval(scheduleSync, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleSync(); });
+window.addEventListener("online", scheduleSync);
 
 // ---- First-visit welcome ----
 function closeWelcome() {
