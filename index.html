@@ -66,7 +66,10 @@
   .due { display: block; font-size: .8rem; color: var(--muted); }
   li.late .due { color: var(--bad); }
   .hist-title { font-family: Georgia, "Times New Roman", serif; font-size: 1.2rem; margin: 26px 0 8px; }
-      #history li { opacity: .75; }
+        #history li { opacity: .75; }
+  [hidden] { display: none !important; }
+  .account { margin-bottom: 14px; font-size: .9rem; color: var(--muted); }
+  .account .act { margin: 6px 6px 0 0; padding: 6px 10px; }
     .intensity { display: block; margin-bottom: 10px; font-size: .9rem; color: var(--muted); }
   #welcome { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 20px; z-index: 11;
              background: color-mix(in srgb, var(--bg) 92%, transparent); }
@@ -96,11 +99,23 @@
   #end div { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; max-width: 360px; text-align: center; }
   #end h2 { font-family: Georgia, serif; margin-top: 0; }
 </style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 </head>
 <body>
 <main>
   <h1>Guilt Trip</h1>
   <p class="sub">Add tasks. Ignore them. Watch your screen unravel.</p>
+
+  <div id="account" class="account">
+    <span id="accStatus">Not signed in. Your tasks stay on this device.</span>
+    <button class="act" id="signInBtn">Sign in to sync</button>
+    <button class="act" id="signOutBtn" hidden>Sign out</button>
+    <form id="signInForm" class="addrow" hidden>
+      <input id="signInEmail" type="email" placeholder="you@example.com" required autocomplete="email">
+      <button class="act" type="submit">Send magic link</button>
+    </form>
+    <p id="signInMsg" class="due"></p>
+  </div>
 
   <div id="desk">
     <div class="stats">
@@ -176,6 +191,8 @@
 const NEGLECT_PER_HOUR = 6;  // points each overdue task adds per hour late
 const MAX_PER_TASK = 40;     // cap so one task can’t max the meter alone
 const STORAGE_KEY = "overdue-tasks";
+const SUPABASE_URL = "https://tydsjmtfwxdkewtiohvf.supabase.co/rest/v1/";
+const SUPABASE_KEY = "sb_publishable_RBGrRR7uGB5_JLRdnUqGfQ_VK08Z1UP";
 const RESCHED_PENALTY = 5;   // extra neglect per reschedule, until the task is done
 
 const WHISPERS = [
@@ -305,7 +322,7 @@ setInterval(() => {
 // Buttons start dodging your cursor when you’re exhausted
 document.querySelectorAll(".act").forEach(btn => {
   btn.addEventListener("mouseenter", () => {
-    if (intensity === "full" && debt > 55 && !btn.closest("#triage") && Math.random() < 0.5) {
+    if (intensity === "full" && debt > 55 && !btn.closest("#triage, #account") && Math.random() < 0.5) {
       const dx = (Math.random() - 0.5) * 80, dy = (Math.random() - 0.5) * 40;
       btn.style.transform = `translate(${dx}px, ${dy}px)`;
       setTimeout(() => btn.style.transform = "", 700);
@@ -386,6 +403,54 @@ $("intensity").addEventListener("change", () => {
 load();
 render();
 tick();
+
+// ---- Accounts (Supabase) ----
+const sb = (window.supabase && SUPABASE_URL.startsWith("https://"))
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY)
+  : null;
+let currentUser = null;
+
+function showAccount() {
+  $("signInBtn").hidden = !!currentUser || !sb;
+  $("signOutBtn").hidden = !currentUser;
+  if (!sb) $("accStatus").textContent = "Sync isn’t available right now. Your tasks stay on this device.";
+  else if (currentUser) $("accStatus").textContent = "Signed in as " + currentUser.email;
+  else $("accStatus").textContent = "Not signed in. Your tasks stay on this device.";
+}
+
+$("signInBtn").addEventListener("click", () => {
+  $("signInForm").hidden = !$("signInForm").hidden;
+});
+
+$("signInForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("signInMsg").textContent = "Sending…";
+  const { error } = await sb.auth.signInWithOtp({
+    email: $("signInEmail").value.trim(),
+    options: { emailRedirectTo: location.origin + location.pathname }
+  });
+  $("signInMsg").textContent = error
+    ? "Couldn’t send the link: " + error.message
+    : "Check your email for a sign-in link.";
+});
+
+$("signOutBtn").addEventListener("click", async () => {
+  await sb.auth.signOut();
+});
+
+if (sb) {
+  sb.auth.onAuthStateChange((_event, session) => {
+    currentUser = session ? session.user : null;
+    $("signInForm").hidden = true;
+    showAccount();
+  });
+  sb.auth.getSession().then(({ data }) => {
+    currentUser = data.session ? data.session.user : null;
+    showAccount();
+  });
+} else {
+  showAccount();
+}
 
 // ---- First-visit welcome ----
 function closeWelcome() {
