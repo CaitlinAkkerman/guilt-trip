@@ -67,7 +67,9 @@
   li.late .due { color: var(--bad); }
   .hist-title { font-family: Georgia, "Times New Roman", serif; font-size: 1.2rem; margin: 26px 0 8px; }
         #history li { opacity: .75; }
-  [hidden] { display: none !important; }
+    [hidden] { display: none !important; }
+  .foot { margin-top: 30px; font-size: .85rem; }
+  .foot a { color: var(--muted); }
   .account { margin-bottom: 14px; font-size: .9rem; color: var(--muted); }
   .account .act { margin: 6px 6px 0 0; padding: 6px 10px; }
     .intensity { display: block; margin-bottom: 10px; font-size: .9rem; color: var(--muted); }
@@ -110,6 +112,7 @@
     <span id="accStatus">Not signed in. Your tasks stay on this device.</span>
     <button class="act" id="signInBtn">Sign in to sync</button>
     <button class="act" id="signOutBtn" hidden>Sign out</button>
+    <button class="act" id="deleteAccBtn" hidden>Delete my account</button>
     <form id="signInForm" class="addrow" hidden>
       <input id="signInEmail" type="email" placeholder="you@example.com" required autocomplete="email">
       <button class="act" type="submit">Send magic link</button>
@@ -150,6 +153,7 @@
       <input id="importFile" type="file" accept="application/json,.json" hidden>
     </div>
   </div>
+<p class="foot"><a href="privacy.html">Privacy</a></p>
 </main>
 
 <div id="welcome" role="dialog" aria-modal="true" aria-labelledby="welTitle">
@@ -440,7 +444,8 @@ let syncNote = "";
 
 function showAccount() {
   $("signInBtn").hidden = !!currentUser || !sb;
-  $("signOutBtn").hidden = !currentUser;
+    $("signOutBtn").hidden = !currentUser;
+  $("deleteAccBtn").hidden = !currentUser;
   if (!sb) $("accStatus").textContent = "Sync isn’t available right now. Your tasks stay on this device.";
   else if (currentUser) $("accStatus").textContent = "Signed in as " + currentUser.email + (syncNote ? " · " + syncNote : "");
   else $("accStatus").textContent = "Not signed in. Your tasks stay on this device.";
@@ -595,6 +600,23 @@ async function syncNow() {
 setInterval(scheduleSync, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleSync(); });
 window.addEventListener("online", scheduleSync);
+
+// ---- Delete account ----
+$("deleteAccBtn").addEventListener("click", async () => {
+  const typed = prompt("This permanently deletes your account and every task synced to it. Tip: use Export tasks first if you want a copy.\n\nType DELETE to continue.");
+  if (typed !== "DELETE") return;
+  clearTimeout(syncTimer);
+  const { error } = await sb.rpc("delete_my_account");
+  if (error) { alert("Couldn’t delete the account: " + error.message); return; }
+  await sb.auth.signOut({ scope: "local" });
+  tasks = [];
+  pendingDeletes = [];
+  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem("overdue-deletes");
+  syncNote = "";
+  render(); tick();
+  alert("Your account and synced tasks have been deleted.");
+});
 
 // ---- First-visit welcome ----
 function closeWelcome() {
