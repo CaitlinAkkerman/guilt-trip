@@ -15,7 +15,10 @@ self.addEventListener("activate", e => {
 });
 
 self.addEventListener("fetch", e => {
-  if (e.request.method !== "GET") return;
+    if (e.request.method !== "GET") return;
+  // Only cache our own files and the Supabase library; never API responses (they hold user data)
+  const url = new URL(e.request.url);
+  if (url.origin !== location.origin && url.hostname !== "cdn.jsdelivr.net") return;
   e.respondWith(
     fetch(e.request)
       .then(res => {
